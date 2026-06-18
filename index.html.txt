@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>dataShred — Security Command Console</title>
+    <style>
+        :root {
+            --bg: #070a13;
+            --card: #0d1527;
+            --border: #1e293b;
+            --text-main: #ffffff;
+            --text-muted: #64748b;
+            --shred-red: #ef4444;
+            --shred-red-glow: rgba(239, 68, 68, 0.2);
+            --green: #10b981;
+            --green-glow: rgba(16, 185, 129, 0.15);
+        }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 550px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 35px;
+        }
+
+        header h1 {
+            font-size: 2.2rem;
+            font-weight: 900;
+            margin: 0;
+            letter-spacing: -0.05em;
+        }
+
+        header h1 span {
+            color: var(--shred-red);
+        }
+
+        header p {
+            color: var(--text-muted);
+            margin: 5px 0 0 0;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+        }
+
+        .card {
+            background-color: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+        }
+
+        h2 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-top: 0;
+            margin-bottom: 15px;
+        }
+
+        input, select {
+            width: 95%;
+            padding: 11px;
+            margin: 8px 0 16px 0;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: #070a13;
+            color: white;
+            font-size: 0.95rem;
+        }
+
+        button {
+            background-color: var(--shred-red);
+            color: #ffffff;
+            border: none;
+            padding: 12px 24px;
+            font-weight: 700;
+            font-size: 0.95rem;
+            border-radius: 6px;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s ease;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        .engine-widget {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8rem;
+            font-weight: 800;
+            padding: 6px 14px;
+            border-radius: 20px;
+            background-color: var(--green-glow);
+            color: var(--green);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--green);
+            border-radius: 50%;
+            animation: pulse 1.8s infinite;
+        }
+
+        .timeline-container {
+            position: relative;
+            padding-left: 20px;
+            border-left: 2px solid var(--border);
+            margin-top: 20px;
+        }
+
+        .timeline-item {
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: var(--shred-red);
+            border-radius: 50%;
+            left: -25px;
+            top: 4px;
+            box-shadow: 0 0 8px var(--shred-red);
+        }
+
+        .timeline-time {
+            font-size: 0.8rem;
+            color: var(--shred-red);
+            font-family: monospace;
+            font-weight: bold;
+        }
+
+        .timeline-title {
+            font-weight: bold;
+            font-size: 0.95rem;
+            margin: 2px 0;
+        }
+
+        .timeline-desc {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .toggle-link {
+            text-align: center;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: block;
+            margin-top: 15px;
+            font-size: 0.9rem;
+            text-decoration: underline;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <header>
+        <h1>data<span>Shred</span></h1>
+        <p>Autonomous Purge Engine</p>
+    </header>
+
+    <!-- 1. AUTHENTICATION BOX (LOGIN / SIGNUP) -->
+    <div class="card" id="auth-box">
+        <h2 id="auth-title">Log In to System Core</h2>
+        <div id="signup-fields" style="display: none;">
+            <label>First Name</label><input type="text" id="reg-first">
+            <label>Last Name</label><input type="text" id="reg-last">
+        </div>
+        <label>Email Address</label><input type="email" id="auth-email">
+        <label>Password</label><input type="password" id="auth-pass">
+        <button onclick="submitAuthForm()">Access Console</button>
+        <span class="toggle-link" id="auth-toggle" onclick="toggleAuthMode()">Create an account</span>
+    </div>
+
+    <!-- 2. PAYMENT / CHOOSE PACKAGE GATEWAY -->
+    <div class="card" id="paywall-box" style="display: none;">
+        <h2 style="text-align: center;">🔒 Select Your Protection Level</h2>
+        <p style="color: var(--text-muted); text-align: center; font-size: 0.9rem; margin-bottom: 20px;">Choose how you want dataShred to clean your records.</p>
+        <div style="display: flex; flex-direction: column; gap: 15px;">
+            <div style="border: 1px solid var(--border); padding: 15px; border-radius: 8px;">
+                <h3 style="margin:0;">Single Purge</h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin: 5px 0 15px 0;">One-time complete data wipe across networks.</p>
+                <button style="background-color: var(--text-muted);" onclick="alert('Checkout single scan for $29')">Get 1 Scan ($29)</button>
+            </div>
+            <div style="border: 1px solid var(--shred-red); padding: 15px; border-radius: 8px; background: rgba(239, 68, 68, 0.02);">
+                <h3 style="margin:0; color: var(--shred-red);">🔥 1-Year Protection</h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin: 5px 0 15px 0;">Continuous scanning and automatic updates for 12 full months.</p>
+                <button onclick="alert('Checkout annual package for $100')">Get 1 Year ($100)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. PRODUCTION PREMIUM VISUAL DASHBOARD -->
+    <div id="main-dashboard" style="display: none;">
+        <div class="card engine-widget">
+            <div>
+                <h2 style="margin:0;">System Connection</h2>
+                <p style="color: var(--text-muted); font-size: 0.85rem; margin: 4px 0 0 0;" id="account-status-text">Verification active...</p>
+            </div>
+            <div class="status-badge">
+                <div class="pulse-dot"></div>
+                ENGINE LIVE
+            </div>
+        </div>
+
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h2 style="margin:0;">⏱️ Real-Time Activity Log</h2>
+                <button id="reset-scan-btn" onclick="triggerManualReset()" style="width: auto; padding: 8px 16px; font-size: 0.85rem;">⚡ Shred Now</button>
+            </div>
+            <div class="timeline-container" id="timeline-box">
+                <div class="timeline-desc">Awaiting process execution. Click Shred Now to deploy agent.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. ROOT ADMINISTRATIVE CONTROL MODULE -->
+    <div class="card" id="admin-panel" style="margin-top: 40px; border: 1px dashed var(--shred-red);">
+        <h3 style="color: var(--shred-red); margin-top: 0;">🛠️ Owner Administrative Controls</h3>
+        <label>Target Customer ID</label><input type="number" id="adm-user-id">
+        <label>Tier Tier Plan</label>
+        <select id="adm-tier">
+            <option value="single">Single Scan Credit ($29)</option>
+            <option value="annual">1-Year Automated Updates ($100)</option>
+        </select>
+        <label>Admin Master Key</label><input type="password" id="adm-secret">
+        <button style="background-color: var(--green);" onclick="addTierAccess()">Authorize Order Manually</button>
+    </div>
+
+</div>
+
+<script>
+    const HOST_API = "https://railway.app"; // Swap out with your real url once live on Railway
+    let currentMode = "login";
+    let globalCustomerId = null;
+
+    function toggleAuthMode() {
+        const isLogin = currentMode === "login";
+        currentMode = isLogin ? "signup" : "login";
+        document.getElementById("auth-title").innerText = isLogin ? "Create Security Account" : "Log In to System Core";
+        document.getElementById("signup-fields").style.display = isLogin ? "block" : "none";
+        document.getElementById("auth-toggle").innerText = isLogin ? "Already have an account? Log In" : "Create an account";
+    }
+
+    async function submitAuthForm() {
+        const email = document.getElementById("auth-email").value;
+        const password = document.getElementById("auth-pass").value;
+        let endpoint = `${HOST_API}/auth/login`;
