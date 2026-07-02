@@ -43,7 +43,7 @@ Base.metadata.create_all(bind=engine)
 scheduler = BackgroundScheduler()
 scheduler.start()
 
-app = FastAPI(title="dataShred Central API")
+app = FastAPI(title="DataShred101 API")
 
 # Allow your frontend webpage to talk to this backend securely
 app.add_middleware(
@@ -125,7 +125,7 @@ def trigger_scan(customer_id: int, db=Depends(get_db)):
 
     timestamp = datetime.now().strftime("%I:%M %p")
     user.activity_timeline = [
-        {"time": timestamp, "event": "Initialization", "details": "Autonomous dataShred core engine spawned successfully."},
+        {"time": timestamp, "event": "Initialization", "details": "Autonomous DataShred101 core engine spawned successfully."},
         {"time": timestamp, "event": "Scanning", "details": "Crawling database indexes for matching criteria..."}
     ]
     
