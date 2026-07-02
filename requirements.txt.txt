@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+stripe
+apscheduler
+pydantic[email]
+playwright
+requests
