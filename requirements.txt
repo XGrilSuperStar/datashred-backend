@@ -1,4 +1,4 @@
-fastapi
+textfastapi
 uvicorn
 sqlalchemy
 psycopg2-binary
@@ -7,3 +7,4 @@ apscheduler
 pydantic[email]
 playwright
 requests
+Use code with caution.Click the green Commit changes... button in the top right corner, then click Commit changes again in the popup box to save it.Step 3: Drag and Drop Your Python CodeNow, let's upload your actual server logic file:Click on the main blue datashred-backend link at the top of the page to return to your repository home screen.Click the Add file button again, but this time select Upload files.Drag your completed server.py file from your computer and drop it into the box on the screen.Click the green Commit changes button at the bottom of the page.Your private GitHub folder is now fully prepared! It contains your server script (server.py) and your server package checklist (requirements.txt).Your Next Move: Hooking up the Cloud HostNow that your code is securely saved on GitHub, we can connect it to a free cloud hosting server so the public can access your sign-up portal.If you're ready, let's proceed to Railway.app:Go to Railway.app and click Login in the top right corner.Choose Sign in with GitHub and authorize it.Let me know once you are logged into Railway, and I will show you how to launch your live database and turn dataShred completely online!22 sitesShowcasing on GitHub: The Complete GuideFeb 13, 2023 — One of the best features of GitHub is its neat desktop app that lets you upload code without using terminal commands. Though that ...Polygence3 Ways to Backup Your CodeDec 6, 2021 — You can upload, edit, and find files directly from GitHub.com without downloading the files or navigating the terminal.Black Girl BytesDeploy a React App: Step-by-Step Guide from HostmanJan 31, 2025 — Uploading Code to GitHub Once the Mini App is ready, you need to upload the files from the folder to GitHub. Create a new private ...HostmanShow all
