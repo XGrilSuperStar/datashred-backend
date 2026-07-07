@@ -2,8 +2,8 @@ fastapi
 uvicorn
 sqlalchemy
 psycopg2-binary
-stripe
 apscheduler
-pydantic[email]
-playwright
-requests
+stripe
+bcrypt==4.2.0
+PyJWT==2.9.0
+slowapi==0.1.9
