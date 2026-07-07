@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, create_engine
 from sqlalchemy.orm import sessionmaker
@@ -27,12 +28,12 @@ class Customer(Base):
     password = Column(String, nullable=False)
     first_name = Column(String)
     last_name = Column(String)
-    
+
     # Tier Tracking
     scan_credits = Column(Integer, default=0)
     is_annual_subscriber = Column(Boolean, default=False)
     annual_expires_at = Column(DateTime, nullable=True)
-    
+
     progress_log = Column(JSON, default=dict)
     activity_timeline = Column(JSON, default=list)
     last_scan_date = Column(DateTime, default=datetime.utcnow)
@@ -53,6 +54,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/")
+def serve_homepage():
+    return FileResponse("index.html")
 
 def get_db():
     db = SessionLocal()
@@ -98,7 +103,7 @@ def login(form: UserAuthForm, db=Depends(get_db)):
 def get_dashboard(customer_id: int, db=Depends(get_db)):
     user = db.query(Customer).filter(Customer.id == customer_id).first()
     if not user: raise HTTPException(status_code=404, detail="User profile missing.")
-    
+
     is_annual_active = user.is_annual_subscriber and user.annual_expires_at and user.annual_expires_at > datetime.utcnow()
 
     return {
@@ -117,7 +122,7 @@ def trigger_scan(customer_id: int, db=Depends(get_db)):
     if not user: raise HTTPException(status_code=404, detail="User missing.")
 
     is_annual_active = user.is_annual_subscriber and user.annual_expires_at and user.annual_expires_at > datetime.utcnow()
-    
+
     if not is_annual_active:
         if user.scan_credits < 1:
             raise HTTPException(status_code=402, detail="No scan credits remaining.")
@@ -128,10 +133,10 @@ def trigger_scan(customer_id: int, db=Depends(get_db)):
         {"time": timestamp, "event": "Initialization", "details": "Autonomous dataShred core engine spawned successfully."},
         {"time": timestamp, "event": "Scanning", "details": "Crawling database indexes for matching criteria..."}
     ]
-    
+
     for broker in user.progress_log.keys():
         user.progress_log[broker] = {"status": "pending", "notes": "Dispatched."}
-        
+
     db.commit()
     return {"status": "success", "message": "Scrub tracking session initialized."}
 
@@ -144,61 +149,4 @@ async def stripe_webhook_listener(request: Request, db=Depends(get_db)):
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-    except (ValueError, stripe.error.SignatureVerificationError):
-        raise HTTPException(status_code=400, detail="Security verification failed.")
-
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        customer_id = session.get("metadata", {}).get("customer_id")
-        purchased_tier = session.get("metadata", {}).get("tier_choice")
-
-        if customer_id:
-            user = db.query(Customer).filter(Customer.id == int(customer_id)).first()
-            if user:
-                if purchased_tier == "single":
-                    user.scan_credits += 1
-                elif purchased_tier == "annual":
-                    user.is_annual_subscriber = True
-                    user.annual_expires_at = datetime.utcnow() + timedelta(days=365)
-                    user.scan_credits += 1
-                db.commit()
-
-    return {"status": "success"}
-
-# --- OWNER ADMINISTRATIVE CONTROL CORE ---
-
-@app.post("/api/v1/admin/grant-access")
-def admin_grant_access(customer_id: int, tier_choice: str, admin_secret: str, db=Depends(get_db)):
-    if admin_secret != os.getenv("ADMIN_SECRET_KEY", "super_secret_admin_pass"):
-        raise HTTPException(status_code=403, detail="Invalid admin master key.")
-    
-    user = db.query(Customer).filter(Customer.id == customer_id).first()
-    if not user: raise HTTPException(status_code=404, detail="User not found.")
-
-    if tier_choice == "single":
-        user.scan_credits += 1
-    elif tier_choice == "annual":
-        user.is_annual_subscriber = True
-        user.annual_expires_at = datetime.utcnow() + timedelta(days=365)
-        user.scan_credits += 1
-
-    db.commit()
-    return {"status": "success", "message": f"Successfully upgraded user {user.email}."}
-
-# --- AUTOMATED BACKGROUND QUARTERLY CLEANUP TIMER ---
-def run_automatic_annual_refreshes():
-    db = SessionLocal()
-    try:
-        now = datetime.utcnow()
-        ninety_days_ago = now - timedelta(days=90)
-        due_users = db.query(Customer).filter(
-            Customer.is_annual_subscriber == True, Customer.annual_expires_at > now, Customer.last_scan_date <= ninety_days_ago
-        ).all()
-        for user in due_users:
-            for broker in user.progress_log.keys():
-                user.progress_log[broker] = {"status": "pending", "notes": "Quarterly automated sweep triggered."}
-            user.last_scan_date = now
-        db.commit()
-    finally: db.close()
-
-scheduler.add_job(run_automatic_annual_refreshes, 'interval', days=1)
+    except (ValueError, stripe.error.SignatureVerificationError)
