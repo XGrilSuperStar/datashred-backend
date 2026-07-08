@@ -27,6 +27,7 @@ stripe.api_key = STRIPE_SECRET_KEY
 # so nobody accidentally ships with a guessable session-signing key.
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY")
+OWNER_EMAIL = os.getenv("OWNER_EMAIL", "")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 if ENVIRONMENT == "production" and (not JWT_SECRET_KEY or not ADMIN_SECRET_KEY):
@@ -220,8 +221,9 @@ def get_dashboard(customer_id: int = Depends(get_current_customer_id), db=Depend
         "status": "active",
         "scan_credits": user.scan_credits,
         "is_annual_active": is_annual_active,
+        "is_admin": bool(OWNER_EMAIL) and user.email.lower() == OWNER_EMAIL.lower(),
         "expiry_date": user.annual_expires_at.strftime("%Y-%m-%d") if user.annual_expires_at else None,
-        "customer_profile": {"name": f"{user.first_name} {user.last_name}"},
+        "customer_profile": {"name": f"{user.first_name} {user.last_name}", "id": user.id},
         "agent_progress": user.progress_log,
         "timeline": user.activity_timeline
     }
