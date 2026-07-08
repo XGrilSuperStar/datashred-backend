@@ -173,18 +173,26 @@ def register(request: Request, form: UserRegisterForm, db=Depends(get_db)):
         raise HTTPException(status_code=400, detail="Account already exists.")
     if len(form.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
-    new_user = Customer(
-        email=form.email,
-        password_hash=hash_password(form.password),
-        first_name=form.first_name,
-        last_name=form.last_name,
-        progress_log={"spokeo": {"status": "pending"}, "whitepages": {"status": "pending"}},
-        activity_timeline=[{"time": datetime.now().strftime("%I:%M %p"), "event": "Account Created", "details": "Secure profile entry established."}]
-    )
-    db.add(new_user)
-    db.commit()
-    token = create_session_token(new_user.id)
-    return {"status": "success", "token": token}
+    try:
+        new_user = Customer(
+            email=form.email,
+            password_hash=hash_password(form.password),
+            first_name=form.first_name,
+            last_name=form.last_name,
+            progress_log={"spokeo": {"status": "pending"}, "whitepages": {"status": "pending"}},
+            activity_timeline=[{"time": datetime.now().strftime("%I:%M %p"), "event": "Account Created", "details": "Secure profile entry established."}]
+        )
+        db.add(new_user)
+        db.commit()
+        token = create_session_token(new_user.id)
+        return {"status": "success", "token": token}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        # TEMPORARY: surfaces the real DB error to the client for debugging.
+        # Remove this except block once registration is confirmed working.
+        raise HTTPException(status_code=500, detail=f"DEBUG {type(e).__name__}: {e}")
 
 @app.post("/api/v1/auth/login")
 @limiter.limit("10/minute")
