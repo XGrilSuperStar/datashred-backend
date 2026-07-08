@@ -535,8 +535,9 @@
             const data = await res.json();
             const canScan = data.is_annual_active || data.scan_credits > 0;
             hide("auth-box"); hide("paywall-box");
+            block("admin-toggle-area");
             if (!canScan) { block("paywall-box"); return; }
-            block("main-dashboard"); block("admin-toggle-area");
+            block("main-dashboard");
             const name = data.customer_profile?.name || "Agent";
             let subtitle = `Welcome, ${name}`;
             if (data.is_annual_active) {
