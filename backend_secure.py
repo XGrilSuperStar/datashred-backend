@@ -197,13 +197,14 @@ class AdminGrantForm(BaseModel):
 def register(request: Request, form: UserRegisterForm, db=Depends(get_db)):
     if not verify_recaptcha(form.recaptcha_token):
         raise HTTPException(status_code=400, detail="reCAPTCHA verification failed. Please try again.")
-    if db.query(Customer).filter(Customer.email == form.email).first():
+    normalized_email = form.email.strip().lower()
+    if db.query(Customer).filter(Customer.email == normalized_email).first():
         raise HTTPException(status_code=400, detail="Account already exists.")
     if len(form.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
     try:
         new_user = Customer(
-            email=form.email,
+            email=normalized_email,
             password_hash=hash_password(form.password),
             first_name=form.first_name,
             last_name=form.last_name,
@@ -216,16 +217,15 @@ def register(request: Request, form: UserRegisterForm, db=Depends(get_db)):
         return {"status": "success", "token": token}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         db.rollback()
-        # TEMPORARY: surfaces the real DB error to the client for debugging.
-        # Remove this except block once registration is confirmed working.
-        raise HTTPException(status_code=500, detail=f"DEBUG {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail="Registration failed. Please try again.")
 
 @app.post("/api/v1/auth/login")
 @limiter.limit("10/minute")
 def login(request: Request, form: UserAuthForm, db=Depends(get_db)):
-    user = db.query(Customer).filter(Customer.email == form.email).first()
+    normalized_email = form.email.strip().lower()
+    user = db.query(Customer).filter(Customer.email == normalized_email).first()
     if not user or not verify_password(form.password, user.password_hash):
         # Same error whether the email doesn't exist or the password is wrong --
         # don't reveal which one, so accounts can't be enumerated.
