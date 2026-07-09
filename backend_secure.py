@@ -310,10 +310,8 @@ def create_checkout(form: CheckoutForm, customer_id: int = Depends(get_current_c
         return {"checkout_url": session.url}
     except HTTPException:
         raise
-    except Exception as e:
-        # TEMPORARY: surfaces the real error to the client for debugging.
-        # Remove this except block once checkout is confirmed working.
-        raise HTTPException(status_code=500, detail=f"DEBUG {type(e).__name__}: {e}")
+    except stripe.error.StripeError:
+        raise HTTPException(status_code=502, detail="Payment provider error. Please try again shortly.")
 
 # --- AUTOMATED STRIPE WEBHOOK LISTENER ---
 
