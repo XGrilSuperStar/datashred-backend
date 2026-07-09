@@ -298,15 +298,22 @@ def create_checkout(form: CheckoutForm, customer_id: int = Depends(get_current_c
     if not user: raise HTTPException(status_code=404, detail="User missing.")
 
     price_id = os.getenv("STRIPE_PRICE_SINGLE") if form.tier == "single" else os.getenv("STRIPE_PRICE_ANNUAL")
-    session = stripe.checkout.Session.create(
-        mode="payment" if form.tier == "single" else "subscription",
-        line_items=[{"price": price_id, "quantity": 1}],
-        customer_email=user.email,
-        metadata={"customer_id": str(customer_id), "tier_choice": form.tier},
-        success_url=f"{FRONTEND_ORIGIN}/?payment=success",
-        cancel_url=f"{FRONTEND_ORIGIN}/?payment=cancelled",
-    )
-    return {"checkout_url": session.url}
+    try:
+        session = stripe.checkout.Session.create(
+            mode="payment" if form.tier == "single" else "subscription",
+            line_items=[{"price": price_id, "quantity": 1}],
+            customer_email=user.email,
+            metadata={"customer_id": str(customer_id), "tier_choice": form.tier},
+            success_url=f"{FRONTEND_ORIGIN}/?payment=success",
+            cancel_url=f"{FRONTEND_ORIGIN}/?payment=cancelled",
+        )
+        return {"checkout_url": session.url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        # TEMPORARY: surfaces the real error to the client for debugging.
+        # Remove this except block once checkout is confirmed working.
+        raise HTTPException(status_code=500, detail=f"DEBUG {type(e).__name__}: {e}")
 
 # --- AUTOMATED STRIPE WEBHOOK LISTENER ---
 
