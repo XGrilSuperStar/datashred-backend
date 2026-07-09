@@ -220,6 +220,7 @@
             .stat-bar { grid-template-columns: repeat(3, 1fr); }
         }
     </style>
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
 </head>
 <body>
 
@@ -367,7 +368,24 @@
         <label>Email</label>
         <input type="email" id="auth-email" placeholder="you@example.com">
         <label>Password</label>
-        <input type="password" id="auth-pass" placeholder="••••••••">
+        <div style="position:relative;">
+            <input type="password" id="auth-pass" placeholder="••••••••" style="width:100%;padding-right:40px;box-sizing:border-box;">
+            <button type="button" id="pass-eye" onclick="togglePasswordVisibility('auth-pass','pass-eye')" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:4px;color:var(--muted);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+        </div>
+        <div id="confirm-pass-field" style="display:none;">
+            <label>Confirm password</label>
+            <div style="position:relative;">
+                <input type="password" id="auth-pass-confirm" placeholder="••••••••" style="width:100%;padding-right:40px;box-sizing:border-box;">
+                <button type="button" id="pass-confirm-eye" onclick="togglePasswordVisibility('auth-pass-confirm','pass-confirm-eye')" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:4px;color:var(--muted);">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+            </div>
+        </div>
+        <div id="captcha-field" style="display:none;margin-bottom:12px;">
+            <div class="g-recaptcha" data-sitekey="6LfZAEstAAAAAKOLP25KUEKq53vfHQuxLef84UE-"></div>
+        </div>
         <button class="btn btn-primary" id="auth-btn" onclick="submitAuthForm()">Access console</button>
         <span class="toggle-link" id="auth-toggle" onclick="toggleAuthMode()">Create an account</span>
     </div>
@@ -484,8 +502,22 @@
         currentMode = isLogin ? "signup" : "login";
         document.getElementById("auth-title").innerText  = isLogin ? "Create your account" : "Sign in to your account";
         document.getElementById("signup-fields").style.display = isLogin ? "block" : "none";
+        document.getElementById("confirm-pass-field").style.display = isLogin ? "block" : "none";
+        document.getElementById("captcha-field").style.display = isLogin ? "block" : "none";
         document.getElementById("auth-toggle").innerText = isLogin ? "Already have an account? Log in" : "Create an account";
         hideError("error-msg");
+    }
+
+    function togglePasswordVisibility(inputId, btnId) {
+        const input = document.getElementById(inputId);
+        const btn = document.getElementById(btnId);
+        if (input.type === "password") {
+            input.type = "text";
+            btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0112 20c-7 0-11-8-11-8a21.8 21.8 0 015.06-6.06M9.9 4.24A10.94 10.94 0 0112 4c7 0 11 8 11 8a21.8 21.8 0 01-3.22 4.5M14.12 14.12a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+        } else {
+            input.type = "password";
+            btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+        }
     }
 
     async function submitAuthForm() {
@@ -499,16 +531,20 @@
             if (currentMode === "signup") {
                 const first = document.getElementById("reg-first").value.trim();
                 const last  = document.getElementById("reg-last").value.trim();
+                const confirmPass = document.getElementById("auth-pass-confirm").value;
                 if (!first || !last) { showError("error-msg", "Please enter your name."); setBtn("auth-btn", "Access console", false); return; }
+                if (password !== confirmPass) { showError("error-msg", "Passwords do not match."); setBtn("auth-btn", "Access console", false); return; }
+                const recaptchaToken = grecaptcha.getResponse();
+                if (!recaptchaToken) { showError("error-msg", "Please complete the \"I'm not a robot\" check."); setBtn("auth-btn", "Access console", false); return; }
                 endpoint = `${HOST_API}/api/v1/auth/register`;
-                body = { email, password, first_name: first, last_name: last };
+                body = { email, password, first_name: first, last_name: last, recaptcha_token: recaptchaToken };
             } else {
                 endpoint = `${HOST_API}/api/v1/auth/login`;
                 body = { email, password };
             }
             const res  = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
             const data = await res.json();
-            if (!res.ok) { showError("error-msg", data.detail || "Authentication failed."); setBtn("auth-btn", "Access console", false); return; }
+            if (!res.ok) { showError("error-msg", data.detail || "Authentication failed."); setBtn("auth-btn", "Access console", false); if (currentMode === "signup" && typeof grecaptcha !== "undefined") grecaptcha.reset(); return; }
             sessionToken = data.token;
             localStorage.setItem("ds_token", sessionToken);
             hide("auth-box");
