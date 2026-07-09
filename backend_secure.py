@@ -1,4 +1,6 @@
 import os
+import urllib.request
+import urllib.parse
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import Depends, FastAPI, HTTPException, Request, Header
@@ -28,6 +30,7 @@ stripe.api_key = STRIPE_SECRET_KEY
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY")
 OWNER_EMAIL = os.getenv("OWNER_EMAIL", "")
+RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY", "")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 if ENVIRONMENT == "production" and (not JWT_SECRET_KEY or not ADMIN_SECRET_KEY):
@@ -146,6 +149,28 @@ def verify_admin_key(x_admin_key: str = Header(None)):
     if not x_admin_key or x_admin_key != ADMIN_SECRET_KEY:
         raise HTTPException(status_code=403, detail="Invalid admin master key.")
 
+def verify_recaptcha(token: str) -> bool:
+    """Calls Google's siteverify endpoint to confirm the checkbox was solved
+    by a real browser, not a bot hitting the API directly."""
+    if not RECAPTCHA_SECRET_KEY:
+        # Fails closed in production (no key = registration blocked) rather
+        # than silently skipping the check.
+        return ENVIRONMENT != "production"
+    if not token:
+        return False
+    try:
+        data = urllib.parse.urlencode({
+            "secret": RECAPTCHA_SECRET_KEY,
+            "response": token,
+        }).encode()
+        req = urllib.request.Request("https://www.google.com/recaptcha/api/siteverify", data=data)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            import json
+            result = json.loads(resp.read().decode())
+            return bool(result.get("success"))
+    except Exception:
+        return False
+
 # --- VALIDATION OBJECTS ---
 class UserAuthForm(BaseModel):
     email: EmailStr
@@ -156,6 +181,7 @@ class UserRegisterForm(BaseModel):
     password: str
     first_name: str
     last_name: str
+    recaptcha_token: str
 
 class CheckoutForm(BaseModel):
     tier: str
@@ -169,6 +195,8 @@ class AdminGrantForm(BaseModel):
 @app.post("/api/v1/auth/register")
 @limiter.limit("5/minute")
 def register(request: Request, form: UserRegisterForm, db=Depends(get_db)):
+    if not verify_recaptcha(form.recaptcha_token):
+        raise HTTPException(status_code=400, detail="reCAPTCHA verification failed. Please try again.")
     if db.query(Customer).filter(Customer.email == form.email).first():
         raise HTTPException(status_code=400, detail="Account already exists.")
     if len(form.password) < 8:
