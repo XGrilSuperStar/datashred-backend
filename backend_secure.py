@@ -36,11 +36,6 @@ stripe.api_key = STRIPE_SECRET_KEY
 # 2Captcha API Key Setup
 CAPTCHA_SOLVER_API_KEY = os.getenv("2CAPTCHA_API_KEY", "YOUR_CAPTCHA_SOLVER_API_KEY")
 
-# --- AUTH / SESSION CONFIGURATION ---
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY")
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
-
 if ENVIRONMENT == "production" and (not JWT_SECRET_KEY or not ADMIN_SECRET_KEY):
     raise RuntimeError(
         "JWT_SECRET_KEY and ADMIN_SECRET_KEY must be set in the environment before "
