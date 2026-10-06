@@ -76,7 +76,43 @@ class Customer(Base):
     activity_timeline = Column(JSON, default=list)
     last_scan_date = Column(DateTime, default=datetime.utcnow)
 
+class Broker(Base):
+    __tablename__ = "brokers"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    dba = Column(String, default="")
+    website = Column(String, default="")
+    opt_out_email = Column(String, default="")
+    opt_out_phone = Column(String, default="")
+    opt_out_url = Column(String, default="")
+    notes = Column(String, default="")
+    sources = Column(JSON, default=list)
+
 Base.metadata.create_all(bind=engine)
+
+
+def seed_brokers():
+    """Loads data/brokers.json into the brokers table; adds any names not already there."""
+    import json
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "brokers.json")
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        rows = json.load(f)
+    db = SessionLocal()
+    try:
+        existing = {n for (n,) in db.query(Broker.name).all()}
+        for r in rows:
+            if r["name"] in existing:
+                continue
+            db.add(Broker(**{k: r.get(k, "" if k != "sources" else []) for k in
+                             ("name", "dba", "website", "opt_out_email", "opt_out_phone", "opt_out_url", "notes", "sources")}))
+            existing.add(r["name"])
+        db.commit()
+    finally:
+        db.close()
+
+seed_brokers()
 
 # --- BACKGROUND SCHEDULER (QUARTERLY SWEEPS) ---
 scheduler = BackgroundScheduler()
@@ -269,6 +305,16 @@ def get_dashboard(customer_id: int = Depends(get_current_customer_id), db=Depend
         "agent_progress": user.progress_log,
         "timeline": user.activity_timeline
     }
+
+@app.get("/api/v1/brokers")
+def list_brokers(customer_id: int = Depends(get_current_customer_id), db=Depends(get_db)):
+    rows = db.query(Broker).order_by(Broker.name).all()
+    return {
+        "count": len(rows),
+        "brokers": [{"name": b.name, "dba": b.dba, "website": b.website, "opt_out_email": b.opt_out_email,
+                     "opt_out_phone": b.opt_out_phone, "opt_out_url": b.opt_out_url, "notes": b.notes} for b in rows],
+    }
+
 
 @app.post("/api/v1/dashboard/reset-scan")
 def trigger_scan(customer_id: int = Depends(get_current_customer_id), db=Depends(get_db)):
