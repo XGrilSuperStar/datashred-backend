@@ -34,7 +34,7 @@ STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_your_key_here")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "whsec_your_secret_here")
 stripe.api_key = STRIPE_SECRET_KEY
 
-# 2Captcha API Key Setup
+# 2Captcha API Key Setup (Pulled directly from your Railway Environment Variables)
 CAPTCHA_SOLVER_API_KEY = os.getenv("2CAPTCHA_API_KEY", "YOUR_CAPTCHA_SOLVER_API_KEY")
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-only-insecure-key-do-not-use-in-production")
@@ -212,8 +212,10 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
                 page.fill("input[name='last_name']", user_profile["last_name"])
                 page.fill("input[name='email']", user_profile["email"])
 
-                print(f"[*] Submitting bypass request to 2Captcha for site key: {b_key}")
+                # --- 2CAPTCHA AUTOMATED BYPASS & INJECTION LAYER ---
+                print(f"[*] Contacting 2Captcha server cluster for site key: {b_key}")
                 
+                # Step 1: Submit details to the challenge solver endpoint
                 captcha_submission_url = "http://2captcha.com"
                 payload = {
                     "key": CAPTCHA_SOLVER_API_KEY,
@@ -225,18 +227,14 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
                 
                 response = requests.post(captcha_submission_url, data=payload).json()
                 if response.get("status") != 1:
-                    raise RuntimeError(f"2Captcha Submission Failed: {response.get('request')}")
+                    raise RuntimeError(f"2Captcha Submission Rejection: {response.get('request')}")
                 
                 job_id = response.get("request")
-                print(f"[*] Challenge submitted. Job ID: {job_id}. Polling for token verification response...")
+                print(f"[*] Challenge registered successfully. Tracking Job ID: {job_id}")
 
+                # Step 2: Poll the resolver matrix until a valid token string is generated
                 captcha_result_url = f"http://2captcha.com{CAPTCHA_SOLVER_API_KEY}&action=get&id={job_id}&json=1"
                 token_solution = None
                 
-                for _ in range(24):  
+                for _ in range(24): # Try for 2 minutes total
                     time.sleep(5)
-                    result_res = requests.get(captcha_result_url).json()
-                    if result_res.get("status") == 1:
-                        token_solution = result_res.get("request")
-                        break
-                    elif result_res.get("request") != "CAPCHA_NOT_READY":
