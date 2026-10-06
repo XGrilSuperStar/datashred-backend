@@ -23,6 +23,7 @@ from playwright.sync_api import sync_playwright
 from playwright_stealth import stealth_sync
 
 # --- CONFIGURATION & STRIPE LAYER ---
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     DATABASE_URL = "postgresql://user:pass@localhost/optout_db"
@@ -36,14 +37,15 @@ stripe.api_key = STRIPE_SECRET_KEY
 # 2Captcha API Key Setup
 CAPTCHA_SOLVER_API_KEY = os.getenv("2CAPTCHA_API_KEY", "YOUR_CAPTCHA_SOLVER_API_KEY")
 
-if ENVIRONMENT == "production" and (not JWT_SECRET_KEY or not ADMIN_SECRET_KEY):
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-only-insecure-key-do-not-use-in-production")
+ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "dev-only-insecure-admin-key")
+
+if ENVIRONMENT == "production" and (JWT_SECRET_KEY == "dev-only-insecure-key-do-not-use-in-production" or ADMIN_SECRET_KEY == "dev-only-insecure-admin-key"):
     raise RuntimeError(
-        "JWT_SECRET_KEY and ADMIN_SECRET_KEY must be set in the environment before "
+        "JWT_SECRET_KEY and ADMIN_SECRET_KEY must be set securely in the environment before "
         "running in production. Generate strong random values."
     )
 
-JWT_SECRET_KEY = JWT_SECRET_KEY or "dev-only-insecure-key-do-not-use-in-production"
-ADMIN_SECRET_KEY = ADMIN_SECRET_KEY or "dev-only-insecure-admin-key"
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 24 * 7  
 
@@ -168,7 +170,7 @@ class AdminGrantForm(BaseModel):
 # --- CORE WEB WORKER AUTOMATION & CAPTCHA BYPASS LAYER ---
 
 def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
-    """Asynchronous browser task coordinating clean field insertion and CAPTCHA clearing loops."""
+    """Asynchronous browser task coordinating clean field insertion and 2Captcha automated clearing loops."""
     print(f"[*] Initializing background browser processing thread for user #{customer_id}")
     
     db = SessionLocal()
@@ -191,6 +193,8 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
 
         for broker in DATA_BROKERS:
             b_name = broker["name"]
+            b_url = broker["url"]
+            b_key = broker["site_key"]
             print(f"[*] Automated Worker: Navigating to target portal context -> {b_name}")
             
             try:
@@ -202,38 +206,37 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
                 })
                 db.commit()
 
-                page.goto(broker["url"], wait_until="networkidle", timeout=45000)
+                page.goto(b_url, wait_until="networkidle", timeout=45000)
                 
                 page.fill("input[name='first_name']", user_profile["first_name"])
-                time.sleep(0.5)
                 page.fill("input[name='last_name']", user_profile["last_name"])
-                time.sleep(0.4)
-                page.fill("input[name='email']", user_profile["throwaway_email"])
+                page.fill("input[name='email']", user_profile["email"])
 
-                submit_payload = {
+                print(f"[*] Submitting bypass request to 2Captcha for site key: {b_key}")
+                
+                captcha_submission_url = "http://2captcha.com"
+                payload = {
                     "key": CAPTCHA_SOLVER_API_KEY,
                     "method": "userrecaptcha",
-                    "googlekey": broker["site_key"],
-                    "pageurl": broker["url"],
+                    "googlekey": b_key,
+                    "pageurl": b_url,
                     "json": 1
                 }
                 
-                res = requests.post("https://2captcha.com", data=submit_payload, timeout=15).json()
-                if res.get("status") != 1:
-                    user.progress_log[broker["name"].lower()] = {"status": "error", "notes": "Solver service refused connection tokens."}
-                    db.commit()
-                    continue
-
-                task_id = res.get("request")
-                validation_token = None
+                response = requests.post(captcha_submission_url, data=payload).json()
+                if response.get("status") != 1:
+                    raise RuntimeError(f"2Captcha Submission Failed: {response.get('request')}")
                 
-                for _ in range(36):  
-                    time.sleep(5)
-                    check = requests.get(f"https://2captcha.com{CAPTCHA_SOLVER_API_KEY}&action=get&id={task_id}&json=1", timeout=15).json()
-                    if check.get("status") == 1:
-                        validation_token = check.get("request")
-                        break
-                    if check.get("request") != "CAPCHA_NOT_READY":
-                        break
+                job_id = response.get("request")
+                print(f"[*] Challenge submitted. Job ID: {job_id}. Polling for token verification response...")
 
-                if validation_token:
+                captcha_result_url = f"http://2captcha.com{CAPTCHA_SOLVER_API_KEY}&action=get&id={job_id}&json=1"
+                token_solution = None
+                
+                for _ in range(24):  
+                    time.sleep(5)
+                    result_res = requests.get(captcha_result_url).json()
+                    if result_res.get("status") == 1:
+                        token_solution = result_res.get("request")
+                        break
+                    elif result_res.get("request") != "CAPCHA_NOT_READY":
