@@ -232,6 +232,22 @@ class AdminGrantForm(BaseModel):
     customer_id: int
     tier_choice: str
 
+def broker_progress_template(db):
+    """One 'pending' entry per broker in the brokers table, keyed by lowercase name."""
+    return {n.lower(): {"status": "pending", "display_name": n} for (n,) in db.query(Broker.name).all()}
+
+def sync_progress(user, db):
+    """Adds any brokers missing from a user's progress log (older accounts, newly added brokers)."""
+    log = dict(user.progress_log or {})
+    changed = False
+    for key, entry in broker_progress_template(db).items():
+        if key not in log:
+            log[key] = entry
+            changed = True
+    if changed:
+        user.progress_log = log
+        db.commit()
+
 # --- AUTHENTICATION ENDPOINTS ---
 
 @app.post("/api/v1/auth/register")
@@ -250,7 +266,7 @@ def register(request: Request, form: UserRegisterForm, db=Depends(get_db)):
             password_hash=hash_password(form.password),
             first_name=form.first_name,
             last_name=form.last_name,
-            progress_log={"spokeo": {"status": "pending"}, "whitepages": {"status": "pending"}},
+            progress_log=broker_progress_template(db),
             activity_timeline=[{"time": datetime.now().strftime("%I:%M %p"), "event": "Account Created", "details": "Secure profile entry established."}]
         )
         db.add(new_user)
@@ -292,6 +308,7 @@ def logout(customer_id: int = Depends(get_current_customer_id)):
 def get_dashboard(customer_id: int = Depends(get_current_customer_id), db=Depends(get_db)):
     user = db.query(Customer).filter(Customer.id == customer_id).first()
     if not user: raise HTTPException(status_code=404, detail="User profile missing.")
+    sync_progress(user, db)
 
     is_annual_active = user.is_annual_subscriber and user.annual_expires_at and user.annual_expires_at > datetime.utcnow()
 
@@ -334,8 +351,10 @@ def trigger_scan(customer_id: int = Depends(get_current_customer_id), db=Depends
         {"time": timestamp, "event": "Scanning", "details": "Crawling database indexes for matching criteria..."}
     ]
 
-    for broker in user.progress_log.keys():
-        user.progress_log[broker] = {"status": "pending", "notes": "Dispatched."}
+    sync_progress(user, db)
+    user.progress_log = {
+        k: {**v, "status": "pending", "notes": "Dispatched."} for k, v in user.progress_log.items()
+    }
 
     db.commit()
     return {"status": "success", "message": "Scrub tracking session initialized."}
@@ -424,8 +443,11 @@ def run_automatic_annual_refreshes():
             Customer.is_annual_subscriber == True, Customer.annual_expires_at > now, Customer.last_scan_date <= ninety_days_ago
         ).all()
         for user in due_users:
-            for broker in user.progress_log.keys():
-                user.progress_log[broker] = {"status": "pending", "notes": "Quarterly automated sweep triggered."}
+            sync_progress(user, db)
+            user.progress_log = {
+                k: {**v, "status": "pending", "notes": "Quarterly automated sweep triggered."}
+                for k, v in user.progress_log.items()
+            }
             user.last_scan_date = now
         db.commit()
     finally: db.close()
