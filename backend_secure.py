@@ -48,6 +48,12 @@ JWT_EXPIRY_HOURS = 24 * 7  # sessions last 7 days, then require re-login
 # once the site has a real domain -- do not leave this as "*" in production.
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
 
+# Force the psycopg2 driver (what requirements.txt installs) whatever scheme the host provides.
+for _prefix in ("postgres://", "postgresql://", "postgresql+psycopg://"):
+    if DATABASE_URL.startswith(_prefix):
+        DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len(_prefix):]
+        break
+
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
