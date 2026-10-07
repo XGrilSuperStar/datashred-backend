@@ -383,9 +383,7 @@
                 </button>
             </div>
         </div>
-        <div id="captcha-field" style="display:none;margin-bottom:12px;">
-            <div class="g-recaptcha" data-sitekey="6LfZAEstAAAAAKOLP25KUEKq53vfHQuxLef84UE-"></div>
-        </div>
+
         <button class="btn btn-primary" id="auth-btn" onclick="submitAuthForm()">Access console</button>
         <span class="toggle-link" id="auth-toggle" onclick="toggleAuthMode()">Create an account</span>
     </div>
@@ -534,17 +532,15 @@
                 const confirmPass = document.getElementById("auth-pass-confirm").value;
                 if (!first || !last) { showError("error-msg", "Please enter your name."); setBtn("auth-btn", "Access console", false); return; }
                 if (password !== confirmPass) { showError("error-msg", "Passwords do not match."); setBtn("auth-btn", "Access console", false); return; }
-                const recaptchaToken = grecaptcha.getResponse();
-                if (!recaptchaToken) { showError("error-msg", "Please complete the \"I'm not a robot\" check."); setBtn("auth-btn", "Access console", false); return; }
                 endpoint = `${HOST_API}/api/v1/auth/register`;
-                body = { email, password, first_name: first, last_name: last, recaptcha_token: recaptchaToken };
+                body = { email, password, first_name: first, last_name: last };
             } else {
                 endpoint = `${HOST_API}/api/v1/auth/login`;
                 body = { email, password };
             }
             const res  = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
             const data = await res.json();
-            if (!res.ok) { showError("error-msg", data.detail || "Authentication failed."); setBtn("auth-btn", "Access console", false); if (currentMode === "signup" && typeof grecaptcha !== "undefined") grecaptcha.reset(); return; }
+            if (!res.ok) { showError("error-msg", data.detail || "Authentication failed."); setBtn("auth-btn", "Access console", false); return; }
             sessionToken = data.token;
             localStorage.setItem("ds_token", sessionToken);
             hide("auth-box");

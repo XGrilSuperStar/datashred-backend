@@ -387,8 +387,6 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
 @app.post("/api/v1/auth/register")
 @limiter.limit("5/minute")
 def register(request: Request, form: UserRegisterForm, db=Depends(get_db)):
-    if not verify_recaptcha(form.recaptcha_token):
-        raise HTTPException(status_code=400, detail="reCAPTCHA verification failed. Please try again.")
     normalized_email = form.email.strip().lower()
     if db.query(Customer).filter(Customer.email == normalized_email).first():
         raise HTTPException(status_code=400, detail="Account already exists.")
