@@ -540,7 +540,15 @@
             }
             const res  = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
             const data = await res.json();
-            if (!res.ok) { showError("error-msg", data.detail || "Authentication failed."); setBtn("auth-btn", "Access console", false); return; }
+            if (!res.ok) {
+                let msg = "Authentication failed.";
+                if (Array.isArray(data.detail)) { msg = data.detail.map(d => d.msg || JSON.stringify(d)).join(" "); }
+                else if (typeof data.detail === "string") { msg = data.detail; }
+                else if (data.detail) { msg = JSON.stringify(data.detail); }
+                showError("error-msg", msg);
+                setBtn("auth-btn", "Access console", false);
+                return;
+            }
             sessionToken = data.token;
             localStorage.setItem("ds_token", sessionToken);
             hide("auth-box");
