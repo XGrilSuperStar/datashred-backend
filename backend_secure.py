@@ -254,11 +254,22 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
     
     db = SessionLocal()
     try:
-        p = sync_playwright().start()
+               p = sync_playwright().start()
+        
+        # Pulls your free tier credentials directly from your secure Railway dashboard variables
+        bd_username = os.getenv("BRIGHT_DATA_USERNAME", "YOUR_BRIGHT_DATA_ZONE_USER")
+        bd_password = os.getenv("BRIGHT_DATA_PASSWORD", "YOUR_BRIGHT_DATA_ZONE_PASS")
+        
         browser = p.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-infobars"]
+            proxy={
+                "server": "http://superproxy.io",
+                "username": bd_username,
+                "password": bd_password
+            },
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
         )
+
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
