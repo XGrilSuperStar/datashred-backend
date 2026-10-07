@@ -192,8 +192,8 @@ def verify_admin_key(x_admin_key: str = Header(None)):
         raise HTTPException(status_code=403, detail="Invalid admin master key.")
 
 def verify_recaptcha(token: str) -> bool:
-     """Calls Google's siteverify endpoint to confirm the checkbox was solved
-     by a real browser, not a bot hitting the API directly."""
+    """Calls Google's siteverify endpoint to confirm the checkbox was solved
+    by a real browser, not a bot hitting the API directly."""
     if not RECAPTCHA_SECRET_KEY:
         # Fails closed in production (no key = registration blocked) rather
         # than silently skipping the check.
