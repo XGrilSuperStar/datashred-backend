@@ -223,7 +223,7 @@ class UserRegisterForm(BaseModel):
     password: str
     first_name: str
     last_name: str
-    recaptcha_token: str
+    recaptcha_token: str = ""
 
 class CheckoutForm(BaseModel):
     tier: str
