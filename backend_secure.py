@@ -266,17 +266,86 @@ def _add_timeline(user, db, event, details):
     db.commit()
 
 # --- CORE WEB WORKER AUTOMATION & CAPTCHA BYPASS LAYER ---
-def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
-    """Asynchronous browser task extracting site keys from your database registry and coordinating bypasses."""
-    print(f"[*] Initializing background browser processing thread for user #{customer_id}")
-    
-    db = SessionLocal()
-    try:
-        from playwright.sync_api import sync_playwright
-        from playwright_stealth import stealth_sync
-        p = sync_playwright().start()
+OPT_OUT_CONCURRENCY = int(os.getenv("OPT_OUT_CONCURRENCY", "5"))
 
-        # Pulls your free tier credentials directly from your secure Railway dashboard variables
+CAPTCHA_INJECT_JS = """
+(token) => {
+    document.querySelectorAll('[id="g-recaptcha-response"], [name="g-recaptcha-response"]').forEach(f => f.value = token);
+    if (window.___grecaptcha_cfg && window.___grecaptcha_cfg.clients) {
+        const clients = window.___grecaptcha_cfg.clients;
+        for (const cId in clients) {
+            const client = clients[cId];
+            for (const prop in client) {
+                if (client[prop] && typeof client[prop].callback === 'function') {
+                    client[prop].callback(token);
+                }
+            }
+        }
+    }
+}
+"""
+
+def _solve_captcha(b_key, page_url):
+    payload = {"key": CAPTCHA_SOLVER_API_KEY, "method": "userrecaptcha", "googlekey": b_key, "pageurl": page_url, "json": 1}
+    res = requests.post("https://2captcha.com/in.php", data=payload, timeout=30).json()
+    if res.get("status") != 1:
+        return None
+    job_id = res.get("request")
+    for _ in range(24):  # poll up to 2 minutes
+        time.sleep(5)
+        r = requests.get(f"https://2captcha.com/res.php?key={CAPTCHA_SOLVER_API_KEY}&action=get&id={job_id}&json=1", timeout=30).json()
+        if r.get("status") == 1:
+            return r.get("request")
+    return None
+
+def _process_one_broker(context, b_name, b_url, user_profile, db, user_id):
+    from playwright_stealth import stealth_sync
+    user = db.query(Customer).filter(Customer.id == user_id).first()
+    if not user:
+        return
+    page = context.new_page()
+    try:
+        stealth_sync(page)
+        _set_status(user, db, b_name.lower(), {"status": "processing", "notes": "Intercepting challenge wall...", "display_name": b_name})
+        page.goto(b_url, wait_until="networkidle", timeout=45000)
+
+        if page.locator("input[name='first_name']").count() > 0:
+            page.fill("input[name='first_name']", user_profile["first_name"])
+        if page.locator("input[name='last_name']").count() > 0:
+            page.fill("input[name='last_name']", user_profile["last_name"])
+        if page.locator("input[name='email']").count() > 0:
+            page.fill("input[name='email']", user_profile["email"])
+
+        site_key_element = page.locator("[data-sitekey]").first
+        if site_key_element.count() > 0 and CAPTCHA_SOLVER_API_KEY:
+            b_key = site_key_element.get_attribute("data-sitekey")
+            print(f"[*] CAPTCHA detected on {b_name}. Dispatching key {b_key} to 2Captcha...")
+            _add_timeline(user, db, "Bypassing", f"Solving reCAPTCHA challenge grid layers on {b_name}.")
+            token_solution = _solve_captcha(b_key, page.url)
+            if token_solution:
+                page.evaluate(CAPTCHA_INJECT_JS, token_solution)
+
+        _set_status(user, db, b_name.lower(), {"status": "shredding", "notes": "Bypass tokens injected. Sending purge payload...", "display_name": b_name})
+        submit_btn = page.locator("button[type='submit'], input[type='submit']").first
+        if submit_btn.count() > 0:
+            submit_btn.click()
+            page.wait_for_timeout(4000)
+        _set_status(user, db, b_name.lower(), {"status": "done", "notes": "Records successfully scrubbed.", "display_name": b_name})
+    except Exception as e:
+        _set_status(user, db, b_name.lower(), {"status": "error", "notes": f"Halted: {str(e)}", "display_name": b_name})
+    finally:
+        try:
+            page.close()
+        except Exception:
+            pass
+
+def _worker_chunk(chunk, user_profile, user_id):
+    """One thread = its own Playwright, browser and DB session (Playwright's sync API is not thread-safe)."""
+    from playwright.sync_api import sync_playwright
+    db = SessionLocal()
+    p = None
+    try:
+        p = sync_playwright().start()
         bd_username = os.getenv("BRIGHT_DATA_USERNAME", "")
         bd_password = os.getenv("BRIGHT_DATA_PASSWORD", "")
         bd_host = os.getenv("BRIGHT_DATA_HOST", "brd.superproxy.io:33335")
@@ -284,104 +353,45 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
         if bd_username and bd_password:
             launch_args["proxy"] = {"server": f"http://{bd_host}", "username": bd_username, "password": bd_password}
         browser = p.chromium.launch(**launch_args)
-
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
-        page = context.new_page()
-        stealth_sync(page)
+        for b_name, b_url in chunk:
+            _process_one_broker(context, b_name, b_url, user_profile, db, user_id)
+        browser.close()
+    except Exception as err:
+        print(f"[-] Worker chunk crash: {err}")
+    finally:
+        if p:
+            try:
+                p.stop()
+            except Exception:
+                pass
+        db.close()
 
+def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
+    """Splits all brokers across OPT_OUT_CONCURRENCY parallel browser workers."""
+    print(f"[*] Starting parallel opt-out run for user #{customer_id}")
+    db = SessionLocal()
+    try:
         user = db.query(Customer).filter(Customer.id == customer_id).first()
         if not user:
             return
+        brokers = [(b.name, (b.opt_out_url or b.website)) for b in db.query(Broker).all()]
+        brokers = [(n, u) for n, u in brokers if u]
+        n = max(1, OPT_OUT_CONCURRENCY)
+        chunks = [brokers[i::n] for i in range(n) if brokers[i::n]]
 
-        # Query dynamically against your massive 652+ broker relational data table registry
-        active_brokers = db.query(Broker).all()
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=len(chunks) or 1) as pool:
+            for f in [pool.submit(_worker_chunk, c, user_profile, customer_id) for c in chunks]:
+                f.result()
 
-        for b in active_brokers:
-            b_name = b.name
-            b_url = b.opt_out_url if b.opt_out_url else b.website
-            
-            if not b_url:
-                continue
-
-            try:
-                _set_status(user, db, b_name.lower(), {"status": "processing", "notes": "Intercepting challenge wall...", "display_name": b_name})
-
-                page.goto(b_url, wait_until="networkidle", timeout=45000)
-                
-                # Check element visibility parameters cleanly before execution
-                if page.locator("input[name='first_name']").count() > 0:
-                    page.fill("input[name='first_name']", user_profile["first_name"])
-                if page.locator("input[name='last_name']").count() > 0:
-                    page.fill("input[name='last_name']", user_profile["last_name"])
-                if page.locator("input[name='email']").count() > 0:
-                    page.fill("input[name='email']", user_profile["email"])
-
-                # Locate reCAPTCHA parameter markers automatically within the DOM
-                site_key_element = page.locator("[data-sitekey]").first
-                if site_key_element.count() > 0 and CAPTCHA_SOLVER_API_KEY:
-                    b_key = site_key_element.get_attribute("data-sitekey")
-                    
-                    print(f"[*] CAPTCHA detected on {b_name}. Dispatching key {b_key} to 2Captcha...")
-                    _add_timeline(user, db, "Bypassing", f"Solving reCAPTCHA challenge grid layers on {b_name}.")
-
-                    payload = {
-                        "key": CAPTCHA_SOLVER_API_KEY,
-                        "method": "userrecaptcha",
-                        "googlekey": b_key,
-                        "pageurl": page.url,
-                        "json": 1
-                    }
-                    
-                    res = requests.post("https://2captcha.com/in.php", data=payload, timeout=30).json()
-                    if res.get("status") == 1:
-                        job_id = res.get("request")
-                        token_solution = None
-                        
-                        for _ in range(24): # Poll solver node for 2 minutes max
-                            time.sleep(5)
-                            result_res = requests.get(f"https://2captcha.com/res.php?key={CAPTCHA_SOLVER_API_KEY}&action=get&id={job_id}&json=1", timeout=30).json()
-                            if result_res.get("status") == 1:
-                                token_solution = result_res.get("request")
-                                break
-                        
-                        if token_solution:
-                            # Force the active token string directly into hidden fields and fire the browser config callback
-                            page.evaluate(f"""
-                                (token) => {{
-                                    document.querySelectorAll('[id="g-recaptcha-response"], [name="g-recaptcha-response"]').forEach(f => f.value = token);
-                                    if (window.___grecaptcha_cfg && window.___grecaptcha_cfg.clients) {{
-                                        const clients = window.___grecaptcha_cfg.clients;
-                                        for (const cId in clients) {{
-                                            const client = clients[cId];
-                                            for (const prop in client) {{
-                                                if (client[prop] && typeof client[prop].callback === 'function') {{
-                                                    client[prop].callback(token);
-                                                }}
-                                            }}
-                                        }}
-                                    }}
-                                }}
-                            """, token_solution)
-
-                _set_status(user, db, b_name.lower(), {"status": "shredding", "notes": "Bypass tokens injected. Sending purge payload...", "display_name": b_name})
-
-                submit_btn = page.locator("button[type='submit'], input[type='submit']").first
-                if submit_btn.count() > 0:
-                    submit_btn.click()
-                    page.wait_for_timeout(4000)
-
-                _set_status(user, db, b_name.lower(), {"status": "done", "notes": "Records successfully scrubbed.", "display_name": b_name})
-
-            except Exception as e:
-                _set_status(user, db, b_name.lower(), {"status": "error", "notes": f"Halted: {str(e)}", "display_name": b_name})
-
-        _add_timeline(user, db, "Purged", f"Completed automated background cleanup cycles across global data tables.")
-        browser.close()
-        p.stop()
+        db.expire_all()
+        user = db.query(Customer).filter(Customer.id == customer_id).first()
+        _add_timeline(user, db, "Purged", "Completed automated background cleanup cycles across global data tables.")
     except Exception as global_err:
-        print(f"[-] Automation engine worker thread crash: {str(global_err)}")
+        print(f"[-] Automation engine worker crash: {global_err}")
     finally:
         db.close()
 # --- AUTHENTICATION ENDPOINTS ---
