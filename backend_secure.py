@@ -266,7 +266,10 @@ def _add_timeline(user, db, event, details):
     db.commit()
 
 # --- CORE WEB WORKER AUTOMATION & CAPTCHA BYPASS LAYER ---
-OPT_OUT_CONCURRENCY = int(os.getenv("OPT_OUT_CONCURRENCY", "5"))
+OPT_OUT_CONCURRENCY = int(os.getenv("OPT_OUT_CONCURRENCY", "3"))
+import threading as _threading
+_ACTIVE_RUNS = set()
+_ACTIVE_RUNS_LOCK = _threading.Lock()
 
 CAPTCHA_INJECT_JS = """
 (token) => {
@@ -409,6 +412,8 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
         print(f"[-] Automation engine worker crash: {global_err}")
     finally:
         db.close()
+        with _ACTIVE_RUNS_LOCK:
+            _ACTIVE_RUNS.discard(customer_id)
 # --- AUTHENTICATION ENDPOINTS ---
 
 @app.post("/api/v1/auth/register")
@@ -497,11 +502,18 @@ def trigger_scan(background_tasks: BackgroundTasks, customer_id: int = Depends(g
     user = db.query(Customer).filter(Customer.id == customer_id).first()
     if not user: raise HTTPException(status_code=404, detail="User missing.")
 
+    with _ACTIVE_RUNS_LOCK:
+        if customer_id in _ACTIVE_RUNS:
+            return {"status": "running", "message": "A scan is already running."}
+        _ACTIVE_RUNS.add(customer_id)
+
     is_annual_active = user.is_annual_subscriber and user.annual_expires_at and user.annual_expires_at > datetime.utcnow()
     is_owner = bool(OWNER_EMAIL) and user.email.lower() == OWNER_EMAIL.lower()
 
     if not is_annual_active and not is_owner:
         if user.scan_credits < 1:
+            with _ACTIVE_RUNS_LOCK:
+                _ACTIVE_RUNS.discard(customer_id)
             raise HTTPException(status_code=402, detail="No scan credits remaining.")
         user.scan_credits -= 1
 

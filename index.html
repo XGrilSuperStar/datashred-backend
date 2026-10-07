@@ -613,6 +613,8 @@
     }
 
     async function triggerScan() {
+        const btn = document.querySelector('button[onclick="triggerScan()"]');
+        if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = "Running..."; setTimeout(() => { btn.disabled = false; btn.textContent = "Shred now"; }, 60000); }
         try {
             const res  = await fetch(`${HOST_API}/api/v1/dashboard/reset-scan`, { method: "POST", headers: { "Authorization": `Bearer ${sessionToken}` } });
             const data = await res.json();
