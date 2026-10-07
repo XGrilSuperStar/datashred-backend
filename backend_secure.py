@@ -254,7 +254,7 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
     
     db = SessionLocal()
     try:
-               p = sync_playwright().start()
+            p = sync_playwright().start()
         
         # Pulls your free tier credentials directly from your secure Railway dashboard variables
             bd_username = os.getenv("BRIGHT_DATA_USERNAME", "YOUR_BRIGHT_DATA_ZONE_USER")
