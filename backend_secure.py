@@ -317,13 +317,22 @@ def _process_one_broker(context, b_name, b_url, user_profile, db, user_id):
             page.fill("input[name='email']", user_profile["email"])
 
         site_key_element = page.locator("[data-sitekey]").first
-        if site_key_element.count() > 0 and CAPTCHA_SOLVER_API_KEY:
+        using_bright_data = bool(os.getenv("BRIGHT_DATA_USERNAME") and os.getenv("BRIGHT_DATA_PASSWORD"))
+        if site_key_element.count() > 0:
             b_key = site_key_element.get_attribute("data-sitekey")
-            print(f"[*] CAPTCHA detected on {b_name}. Dispatching key {b_key} to 2Captcha...")
-            _add_timeline(user, db, "Bypassing", f"Solving reCAPTCHA challenge grid layers on {b_name}.")
-            token_solution = _solve_captcha(b_key, page.url)
-            if token_solution:
-                page.evaluate(CAPTCHA_INJECT_JS, token_solution)
+            if using_bright_data:
+                print(f"[*] CAPTCHA detected on {b_name}. Letting Bright Data auto-unlock...")
+                _add_timeline(user, db, "Bypassing", f"Bright Data auto-unlock in progress on {b_name}.")
+                try:
+                    page.wait_for_selector("[data-sitekey]", state="detached", timeout=45000)
+                except Exception:
+                    pass
+            elif CAPTCHA_SOLVER_API_KEY:
+                print(f"[*] CAPTCHA detected on {b_name}. Dispatching key {b_key} to 2Captcha...")
+                _add_timeline(user, db, "Bypassing", f"Solving reCAPTCHA challenge grid layers on {b_name}.")
+                token_solution = _solve_captcha(b_key, page.url)
+                if token_solution:
+                    page.evaluate(CAPTCHA_INJECT_JS, token_solution)
 
         _set_status(user, db, b_name.lower(), {"status": "shredding", "notes": "Bypass tokens injected. Sending purge payload...", "display_name": b_name})
         submit_btn = page.locator("button[type='submit'], input[type='submit']").first
