@@ -1,9 +1,12 @@
 import os
+import time
+import requests
+from sqlalchemy.orm.attributes import flag_modified
 import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import Depends, FastAPI, HTTPException, Request, Header
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, create_engine
@@ -22,6 +25,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/optou
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_your_key_here")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "whsec_your_secret_here")
 stripe.api_key = STRIPE_SECRET_KEY
+CAPTCHA_SOLVER_API_KEY = os.getenv("CAPTCHA_SOLVER_API_KEY", "")
 
 # --- AUTH / SESSION CONFIGURATION ---
 # JWT_SECRET_KEY and ADMIN_SECRET_KEY MUST be set as real env vars in production.
@@ -247,6 +251,20 @@ def sync_progress(user, db):
     if changed:
         user.progress_log = log
         db.commit()
+def _set_status(user, db, key, entry):
+    log = dict(user.progress_log or {})
+    log[key] = entry
+    user.progress_log = log
+    flag_modified(user, "progress_log")
+    db.commit()
+
+def _add_timeline(user, db, event, details):
+    tl = list(user.activity_timeline or [])
+    tl.append({"time": datetime.now().strftime("%I:%M %p"), "event": event, "details": details})
+    user.activity_timeline = tl
+    flag_modified(user, "activity_timeline")
+    db.commit()
+
 # --- CORE WEB WORKER AUTOMATION & CAPTCHA BYPASS LAYER ---
 def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
     """Asynchronous browser task extracting site keys from your database registry and coordinating bypasses."""
@@ -254,20 +272,18 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
     
     db = SessionLocal()
     try:
+        from playwright.sync_api import sync_playwright
+        from playwright_stealth import stealth_sync
         p = sync_playwright().start()
 
         # Pulls your free tier credentials directly from your secure Railway dashboard variables
-        bd_username = os.getenv("BRIGHT_DATA_USERNAME", "YOUR_BRIGHT_DATA_ZONE_USER")
-        bd_password = os.getenv("BRIGHT_DATA_PASSWORD", "YOUR_BRIGHT_DATA_ZONE_PASS")
-        browser = p.chromium.launch(
-            headless=True,
-            proxy={
-                "server": "http://superproxy.io",
-                "username": bd_username,
-                "password": bd_password
-            },
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
-        )
+        bd_username = os.getenv("BRIGHT_DATA_USERNAME", "")
+        bd_password = os.getenv("BRIGHT_DATA_PASSWORD", "")
+        bd_host = os.getenv("BRIGHT_DATA_HOST", "brd.superproxy.io:33335")
+        launch_args = {"headless": True, "args": ["--disable-blink-features=AutomationControlled", "--no-sandbox"]}
+        if bd_username and bd_password:
+            launch_args["proxy"] = {"server": f"http://{bd_host}", "username": bd_username, "password": bd_password}
+        browser = p.chromium.launch(**launch_args)
 
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -290,8 +306,7 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
                 continue
 
             try:
-                user.progress_log[b_name.lower()] = {"status": "processing", "notes": "Intercepting challenge wall...", "display_name": b_name}
-                db.commit()
+                _set_status(user, db, b_name.lower(), {"status": "processing", "notes": "Intercepting challenge wall...", "display_name": b_name})
 
                 page.goto(b_url, wait_until="networkidle", timeout=45000)
                 
@@ -305,16 +320,11 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
 
                 # Locate reCAPTCHA parameter markers automatically within the DOM
                 site_key_element = page.locator("[data-sitekey]").first
-                if site_key_element.count() > 0:
+                if site_key_element.count() > 0 and CAPTCHA_SOLVER_API_KEY:
                     b_key = site_key_element.get_attribute("data-sitekey")
                     
                     print(f"[*] CAPTCHA detected on {b_name}. Dispatching key {b_key} to 2Captcha...")
-                    user.activity_timeline.append({
-                        "time": datetime.now().strftime("%I:%M %p"),
-                        "event": "Bypassing",
-                        "details": f"Solving reCAPTCHA challenge grid layers on {b_name}."
-                    })
-                    db.commit()
+                    _add_timeline(user, db, "Bypassing", f"Solving reCAPTCHA challenge grid layers on {b_name}.")
 
                     payload = {
                         "key": CAPTCHA_SOLVER_API_KEY,
@@ -324,14 +334,14 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
                         "json": 1
                     }
                     
-                    res = requests.post("http://2captcha.com", data=payload).json()
+                    res = requests.post("https://2captcha.com/in.php", data=payload, timeout=30).json()
                     if res.get("status") == 1:
                         job_id = res.get("request")
                         token_solution = None
                         
                         for _ in range(24): # Poll solver node for 2 minutes max
                             time.sleep(5)
-                            result_res = requests.get(f"http://2captcha.com{CAPTCHA_SOLVER_API_KEY}&action=get&id={job_id}&json=1").json()
+                            result_res = requests.get(f"https://2captcha.com/res.php?key={CAPTCHA_SOLVER_API_KEY}&action=get&id={job_id}&json=1", timeout=30).json()
                             if result_res.get("status") == 1:
                                 token_solution = result_res.get("request")
                                 break
@@ -355,27 +365,19 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
                                 }}
                             """, token_solution)
 
-                user.progress_log[b_name.lower()] = {"status": "shredding", "notes": "Bypass tokens injected. Sending purge payload...", "display_name": b_name}
-                db.commit()
+                _set_status(user, db, b_name.lower(), {"status": "shredding", "notes": "Bypass tokens injected. Sending purge payload...", "display_name": b_name})
 
                 submit_btn = page.locator("button[type='submit'], input[type='submit']").first
                 if submit_btn.count() > 0:
                     submit_btn.click()
                     page.wait_for_timeout(4000)
 
-                user.progress_log[b_name.lower()] = {"status": "done", "notes": "Records successfully scrubbed.", "display_name": b_name}
-                db.commit()
+                _set_status(user, db, b_name.lower(), {"status": "done", "notes": "Records successfully scrubbed.", "display_name": b_name})
 
             except Exception as e:
-                user.progress_log[b_name.lower()] = {"status": "error", "notes": f"Halted: {str(e)}", "display_name": b_name}
-                db.commit()
+                _set_status(user, db, b_name.lower(), {"status": "error", "notes": f"Halted: {str(e)}", "display_name": b_name})
 
-        user.activity_timeline.append({
-            "time": datetime.now().strftime("%I:%M %p"),
-            "event": "Purged",
-            "details": f"Completed automated background cleanup cycles across global data tables."
-        })
-        db.commit()
+        _add_timeline(user, db, "Purged", f"Completed automated background cleanup cycles across global data tables.")
         browser.close()
         p.stop()
     except Exception as global_err:
@@ -466,7 +468,7 @@ def list_brokers(customer_id: int = Depends(get_current_customer_id), db=Depends
 
 
 @app.post("/api/v1/dashboard/reset-scan")
-def trigger_scan(customer_id: int = Depends(get_current_customer_id), db=Depends(get_db)):
+def trigger_scan(background_tasks: BackgroundTasks, customer_id: int = Depends(get_current_customer_id), db=Depends(get_db)):
     user = db.query(Customer).filter(Customer.id == customer_id).first()
     if not user: raise HTTPException(status_code=404, detail="User missing.")
 
@@ -489,7 +491,10 @@ def trigger_scan(customer_id: int = Depends(get_current_customer_id), db=Depends
         k: {**v, "status": "pending", "notes": "Dispatched."} for k, v in user.progress_log.items()
     }
 
+    flag_modified(user, "progress_log")
+    flag_modified(user, "activity_timeline")
     db.commit()
+    background_tasks.add_task(run_opt_out_automation_worker, user.id, {"first_name": user.first_name, "last_name": user.last_name, "email": user.email})
     return {"status": "success", "message": "Scrub tracking session initialized."}
 
 # --- STRIPE CHECKOUT ---
