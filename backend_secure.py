@@ -304,10 +304,14 @@ def _process_one_broker(context, b_name, b_url, user_profile, db, user_id):
     if not user:
         return
     page = context.new_page()
+    page.set_default_timeout(15000)
+    page.set_default_navigation_timeout(25000)
+    print(f"[*] Broker start: {b_name} -> {b_url}", flush=True)
     try:
         stealth_sync(page)
         _set_status(user, db, b_name.lower(), {"status": "processing", "notes": "Intercepting challenge wall...", "display_name": b_name})
-        page.goto(b_url, wait_until="networkidle", timeout=45000)
+        page.goto(b_url, wait_until="domcontentloaded", timeout=25000)
+        page.wait_for_timeout(1500)
 
         if page.locator("input[name='first_name']").count() > 0:
             page.fill("input[name='first_name']", user_profile["first_name"])
@@ -324,7 +328,7 @@ def _process_one_broker(context, b_name, b_url, user_profile, db, user_id):
                 print(f"[*] CAPTCHA detected on {b_name}. Letting Bright Data auto-unlock...")
                 _add_timeline(user, db, "Bypassing", f"Bright Data auto-unlock in progress on {b_name}.")
                 try:
-                    page.wait_for_selector("[data-sitekey]", state="detached", timeout=45000)
+                    page.wait_for_selector("[data-sitekey]", state="detached", timeout=15000)
                 except Exception:
                     pass
             elif CAPTCHA_SOLVER_API_KEY:
@@ -340,8 +344,10 @@ def _process_one_broker(context, b_name, b_url, user_profile, db, user_id):
             submit_btn.click()
             page.wait_for_timeout(4000)
         _set_status(user, db, b_name.lower(), {"status": "done", "notes": "Records successfully scrubbed.", "display_name": b_name})
+        print(f"[+] Broker done: {b_name}", flush=True)
     except Exception as e:
-        _set_status(user, db, b_name.lower(), {"status": "error", "notes": f"Halted: {str(e)}", "display_name": b_name})
+        print(f"[-] Broker error: {b_name}: {str(e)[:150]}", flush=True)
+        _set_status(user, db, b_name.lower(), {"status": "error", "notes": f"Halted: {str(e)[:200]}", "display_name": b_name})
     finally:
         try:
             page.close()
