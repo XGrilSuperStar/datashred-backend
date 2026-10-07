@@ -257,10 +257,9 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
                p = sync_playwright().start()
         
         # Pulls your free tier credentials directly from your secure Railway dashboard variables
-        bd_username = os.getenv("BRIGHT_DATA_USERNAME", "YOUR_BRIGHT_DATA_ZONE_USER")
-        bd_password = os.getenv("BRIGHT_DATA_PASSWORD", "YOUR_BRIGHT_DATA_ZONE_PASS")
-        
-        browser = p.chromium.launch(
+            bd_username = os.getenv("BRIGHT_DATA_USERNAME", "YOUR_BRIGHT_DATA_ZONE_USER")
+            bd_password = os.getenv("BRIGHT_DATA_PASSWORD", "YOUR_BRIGHT_DATA_ZONE_PASS")
+            browser = p.chromium.launch(
             headless=True,
             proxy={
                 "server": "http://superproxy.io",
