@@ -1,3 +1,4 @@
+import re
 import os
 import time
 import requests
@@ -301,6 +302,19 @@ def _solve_captcha(b_key, page_url):
             return r.get("request")
     return None
 
+def _clean_broker_url(u):
+    """Take the first URL if several are joined, and add https:// when the scheme is missing."""
+    if not u:
+        return None
+    parts = re.split(r"[;,\s]+", u.strip())
+    u = parts[0] if parts else ""
+    if not u:
+        return None
+    if not re.match(r"^https?://", u, re.I):
+        u = "https://" + u.lstrip("/")
+    return u
+
+
 def _process_one_broker(context, b_name, b_url, user_profile, db, user_id):
     from playwright_stealth import stealth_sync
     user = db.query(Customer).filter(Customer.id == user_id).first()
@@ -395,7 +409,7 @@ def run_opt_out_automation_worker(customer_id: int, user_profile: dict):
         user = db.query(Customer).filter(Customer.id == customer_id).first()
         if not user:
             return
-        brokers = [(b.name, (b.opt_out_url or b.website)) for b in db.query(Broker).all()]
+        brokers = [(b.name, _clean_broker_url(b.opt_out_url or b.website)) for b in db.query(Broker).all()]
         brokers = [(n, u) for n, u in brokers if u]
         n = max(1, OPT_OUT_CONCURRENCY)
         chunks = [brokers[i::n] for i in range(n) if brokers[i::n]]
