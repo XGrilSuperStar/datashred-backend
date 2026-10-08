@@ -425,6 +425,7 @@
                 <div class="card-title" style="margin-bottom:0;">Activity log</div>
                 <button class="btn btn-primary btn-sm" onclick="triggerScan()">Shred now</button>
             </div>
+            <div class="t-desc" id="scan-progress" style="margin:6px 0 10px;font-weight:600;"></div>
             <div class="timeline" id="timeline-box"></div>
         </div>
 
@@ -567,7 +568,30 @@
         setBtn("auth-btn", "Access console", false);
     }
 
-    async function loadDashboard() {
+    let scanPollTimer = null;
+    function scheduleScanPoll() {
+        clearTimeout(scanPollTimer);
+        scanPollTimer = setTimeout(() => loadDashboard(true), 5000);
+    }
+
+    function updateScanState(data) {
+        const btn  = document.querySelector('button[onclick="triggerScan()"]');
+        const prog = document.getElementById("scan-progress");
+        const list = Object.values(data.agent_progress || {});
+        const total = list.length;
+        const finished = list.filter(b => ["done", "manual", "error"].includes(b.status)).length;
+        if (data.is_running) {
+            if (btn) { btn.disabled = true; btn.textContent = "Running..."; }
+            if (prog) prog.textContent = `Scan running: ${finished} of ${total} brokers finished`;
+            scheduleScanPoll();
+        } else {
+            if (btn) { btn.disabled = false; btn.textContent = "Shred now"; }
+            if (prog) prog.textContent = finished ? `Last scan: ${finished} of ${total} brokers finished` : "";
+            clearTimeout(scanPollTimer); scanPollTimer = null;
+        }
+    }
+
+    async function loadDashboard(isPoll) {
         try {
             const res  = await fetch(`${HOST_API}/api/v1/dashboard`, { headers: { "Authorization": `Bearer ${sessionToken}` } });
             if (res.status === 401) { logout(); return; }
@@ -587,7 +611,11 @@
             document.getElementById("account-status-text").textContent = subtitle;
             renderTimeline(data.timeline || []);
             renderBrokers(data.agent_progress || {});
-        } catch (err) { logout(); }
+            updateScanState(data);
+        } catch (err) {
+            if (isPoll === true) { scheduleScanPoll(); return; }
+            logout();
+        }
     }
 
     function renderTimeline(items) {
@@ -614,13 +642,14 @@
 
     async function triggerScan() {
         const btn = document.querySelector('button[onclick="triggerScan()"]');
-        if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = "Running..."; setTimeout(() => { btn.disabled = false; btn.textContent = "Shred now"; }, 60000); }
+        if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = "Running..."; }
+        const reset = () => { if (btn) { btn.disabled = false; btn.textContent = "Shred now"; } };
         try {
             const res  = await fetch(`${HOST_API}/api/v1/dashboard/reset-scan`, { method: "POST", headers: { "Authorization": `Bearer ${sessionToken}` } });
             const data = await res.json();
-            if (!res.ok) { alert(data.detail || "Unable to start scan."); return; }
-            await loadDashboard();
-        } catch (err) { alert("Server error. Please try again."); }
+            if (!res.ok) { alert(data.detail || "Unable to start scan."); reset(); return; }
+            await loadDashboard(true);
+        } catch (err) { alert("Server error. Please try again."); reset(); }
     }
 
     async function startCheckout(tier) {

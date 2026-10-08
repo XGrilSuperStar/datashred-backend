@@ -484,7 +484,8 @@ def get_dashboard(customer_id: int = Depends(get_current_customer_id), db=Depend
         "expiry_date": user.annual_expires_at.strftime("%Y-%m-%d") if user.annual_expires_at else None,
         "customer_profile": {"name": f"{user.first_name} {user.last_name}", "id": user.id},
         "agent_progress": user.progress_log,
-        "timeline": user.activity_timeline
+        "timeline": user.activity_timeline,
+        "is_running": customer_id in _ACTIVE_RUNS
     }
 
 @app.get("/api/v1/brokers")
